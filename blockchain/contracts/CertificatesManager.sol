@@ -204,7 +204,7 @@ contract CertificatesManager {
     }
 
     // API: POST verify/{certificateId}
-    function verifyCertificateById(string memory _certificateId) public onlyActiveUser returns (
+    function verifyCertificateById(string memory _certificateId) public onlyActiveUser onlyVerifier returns (
         CertificateType certType,
         address issuer,
         address holder,
@@ -229,7 +229,7 @@ contract CertificatesManager {
     }
 
     // API: POST verify/{hash}
-    function verifyCertificateByHash(string memory _fileHash) public onlyActiveUser returns (
+    function verifyCertificateByHash(string memory _fileHash) public onlyActiveUser onlyVerifier returns (
         string memory certificateId,
         CertificateStatus status
     ) {

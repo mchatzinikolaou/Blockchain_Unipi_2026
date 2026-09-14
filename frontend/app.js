@@ -1,5 +1,6 @@
 /* =========================================================================
    ΣΥΝΔΕΣΗ ΜΕ ΤΟ ΠΡΑΓΜΑΤΙΚΟ SMART CONTRACT (ethers.js)
+   Δεν υπάρχει πια .NET API — το UI μιλάει απευθείας με το blockchain.
    Χρειάζεται να τρέχει το τοπικό δίκτυο (run_setup.bat) στο 127.0.0.1:8545.
 ========================================================================= */
 const CONTRACT_ADDRESS = "0x5FC8d32690cc91D4c39d9d3abcBD16989F875707";
@@ -59,9 +60,45 @@ function nameOrAddr(address, nameMap) {
   return n ? n + " (" + shortAddr(address) + ")" : shortAddr(address);
 }
 
-// Μετατροπή σφαλμάτων ethers/Solidity σε κατανοητό μήνυμα
+// Μετατροπή σφαλμάτων ethers/Solidity σε στοχευμένο μήνυμα στα ελληνικά.
+// Οι λέξεις-κλειδιά αντιστοιχούν ακριβώς στα require(...) του CertificatesManager.sol.
+const ERROR_TRANSLATIONS = [
+  ["User is not active or not registered", "Αυτή η διεύθυνση δεν είναι καταχωρημένη ή ενεργή στο σύστημα."],
+  ["Access denied: Requires Admin role", "Δεν έχεις δικαίωμα — αυτή η ενέργεια επιτρέπεται μόνο στον Admin."],
+  ["Access denied: Requires Issuer role", "Δεν έχεις δικαίωμα — αυτή η ενέργεια επιτρέπεται μόνο σε Φορέα Έκδοσης."],
+  ["Access denied: Requires Revocation Officer role", "Δεν έχεις δικαίωμα — αυτή η ενέργεια επιτρέπεται μόνο στον Υπεύθυνο Ανάκλησης."],
+  ["Access denied: Requires Verifier role", "Δεν έχεις δικαίωμα — αυτή η ενέργεια επιτρέπεται μόνο σε Επαληθευτή."],
+  ["Access denied: Requires Auditor role", "Δεν έχεις δικαίωμα — αυτή η ενέργεια επιτρέπεται μόνο σε Ελεγκτή."],
+  ["User already exists and is active", "Υπάρχει ήδη ενεργός χρήστης με αυτή τη διεύθυνση."],
+  ["User does not exist or is inactive", "Δεν βρέθηκε ενεργός χρήστης με αυτή τη διεύθυνση."],
+  ["User is already inactive", "Ο χρήστης είναι ήδη απενεργοποιημένος."],
+  ["User does not exist", "Δεν βρέθηκε χρήστης με αυτή τη διεύθυνση."],
+  ["User is already active", "Ο χρήστης είναι ήδη ενεργός."],
+  ["Certificate ID already exists", "Υπάρχει ήδη πιστοποιητικό με αυτό το ID — δοκίμασε διαφορετικό."],
+  ["A certificate with this file hash already exists", "Αυτό το αρχείο έχει ήδη χρησιμοποιηθεί για άλλο πιστοποιητικό — κάθε αρχείο μπορεί να καταχωρηθεί μία μόνο φορά."],
+  ["Certificate does not exist", "Δεν βρέθηκε πιστοποιητικό με αυτό το ID."],
+  ["Certificate is already revoked", "Αυτό το πιστοποιητικό έχει ήδη ανακληθεί."],
+  ["Certificate not found for this hash", "Δεν βρέθηκε πιστοποιητικό με αυτό το hash."],
+  ["Certificate not found", "Δεν βρέθηκε το συγκεκριμένο πιστοποιητικό."],
+  ["Index out of bounds", "Μη έγκυρος αριθμός εγγραφής."],
+  ["insufficient funds", "Αυτός ο λογαριασμός δεν έχει καθόλου δοκιμαστικό ETH για να πληρώσει το κόστος της συναλλαγής. Ζήτησε από τον Admin να σου μεταφέρει ETH."],
+];
 function friendlyError(err) {
-  return err?.reason || err?.shortMessage || err?.message || "Άγνωστο σφάλμα.";
+  // Το πραγματικό μήνυμα require() μπορεί να κρύβεται σε διαφορετικά σημεία
+  // ανάλογα με το πώς το ethers.js «τύλιξε» το σφάλμα.
+  const raw = [
+    err?.reason,
+    err?.shortMessage,
+    err?.info?.error?.message,
+    err?.error?.message,
+    err?.data?.message,
+    err?.message,
+  ].filter(Boolean).join(" | ");
+
+  const hit = ERROR_TRANSLATIONS.find(([key]) => raw.includes(key));
+  if (hit) return hit[1];
+
+  return "Παρουσιάστηκε σφάλμα κατά την επικοινωνία με το blockchain. Δοκίμασε ξανά, ή έλεγξε αν τρέχει ακόμα το τοπικό δίκτυο.";
 }
 
 /* -------------------------------------------------------------------------
@@ -151,11 +188,15 @@ function selectSection(id, el) {
   renderSection(id);
 }
 
+const STATUS_LABELS = { Active: "Ενεργό", Expired: "Ληγμένο", Revoked: "Ανακλημένο" };
+function statusLabel(statusIdx) {
+  const name = STATUS_NAMES[Number(statusIdx)] || "Active";
+  return STATUS_LABELS[name];
+}
 function statusBadge(statusIdx) {
   const name = STATUS_NAMES[Number(statusIdx)] || "Active";
-  const map = { Active: ["status-active", "Ενεργό"], Expired: ["status-expired", "Ληγμένο"], Revoked: ["status-revoked", "Ανακλημένο"] };
-  const pair = map[name];
-  return '<span class="status ' + pair[0] + '">' + pair[1] + '</span>';
+  const clsMap = { Active: "status-active", Expired: "status-expired", Revoked: "status-revoked" };
+  return '<span class="status ' + clsMap[name] + '">' + STATUS_LABELS[name] + '</span>';
 }
 
 function fmtDate(ts) {
@@ -181,26 +222,54 @@ function renderSection(id) {
   (renderers[id] || (() => { main().innerHTML = ""; }))();
 }
 
-// ---- Γενικός μηχανισμός αναζήτησης πίνακα ----
+const USER_STATUS_TABS = [
+  { id: "all", label: "Όλοι", predicate: () => true },
+  { id: "active", label: "Ενεργοί", predicate: u => u.active },
+  { id: "inactive", label: "Ανενεργοί", predicate: u => !u.active },
+];
+const CERT_STATUS_TABS = [
+  { id: "all", label: "Όλα", predicate: () => true },
+  { id: "active", label: "Ενεργά", predicate: c => Number(c.status) === 0 },
+  { id: "expired", label: "Ληγμένα", predicate: c => Number(c.status) === 1 },
+  { id: "revoked", label: "Ανακλημένα", predicate: c => Number(c.status) === 2 },
+];
+
+// ---- Γενικός μηχανισμός αναζήτησης + tabs πίνακα ----
 window.__tableState = {};
-function renderSearchableTable(sectionId, items, headerHtml, rowFn, searchFn, placeholder) {
-  window.__tableState[sectionId] = { items, headerHtml, rowFn, searchFn };
-  return '<div class="field" style="max-width:320px;">' +
+function renderSearchableTable(sectionId, items, headerHtml, rowFn, searchFn, placeholder, tabs) {
+  window.__tableState[sectionId] = { full: items, items, headerHtml, rowFn, searchFn, tabs, activeTab: tabs ? tabs[0].id : null };
+  const tabsHtml = tabs ? (
+    '<div class="table-tabs">' +
+      tabs.map((t, i) => '<button type="button" class="table-tab' + (i === 0 ? " active" : "") + '" id="tab-' + sectionId + '-' + t.id + '" onclick="selectTableTab(\'' + sectionId + '\', \'' + t.id + '\')">' + t.label + '</button>').join("") +
+    '</div>'
+  ) : "";
+  return tabsHtml +
+    '<div class="field" style="max-width:320px;">' +
       '<input type="text" id="search-' + sectionId + '" placeholder="' + placeholder + '" oninput="filterTable(\'' + sectionId + '\')">' +
     '</div>' +
     '<div id="table-wrap-' + sectionId + '"></div>';
 }
+function selectTableTab(sectionId, tabId) {
+  const st = window.__tableState[sectionId];
+  st.activeTab = tabId;
+  st.tabs.forEach(t => document.getElementById('tab-' + sectionId + '-' + t.id).classList.toggle("active", t.id === tabId));
+  filterTable(sectionId);
+}
 function paintTable(sectionId) {
   const st = window.__tableState[sectionId];
   const wrap = document.getElementById('table-wrap-' + sectionId);
-  if (!st.items.length) { wrap.innerHTML = '<div class="empty-state">Δεν υπάρχουν ακόμα εγγραφές.</div>'; return; }
+  if (!st.items.length) { wrap.innerHTML = '<div class="empty-state">Δεν υπάρχουν εγγραφές με αυτά τα κριτήρια.</div>'; return; }
   wrap.innerHTML = '<table><thead><tr>' + st.headerHtml + '</tr></thead><tbody>' + st.items.map(st.rowFn).join("") + '</tbody></table>';
 }
 function filterTable(sectionId) {
-  const full = window.__tableState[sectionId].__full || window.__tableState[sectionId].items;
-  window.__tableState[sectionId].__full = full;
+  const st = window.__tableState[sectionId];
+  let base = st.full;
+  if (st.tabs) {
+    const tab = st.tabs.find(t => t.id === st.activeTab);
+    base = base.filter(tab.predicate);
+  }
   const q = (document.getElementById('search-' + sectionId).value || "").toLowerCase().trim();
-  window.__tableState[sectionId].items = q ? full.filter(it => window.__tableState[sectionId].searchFn(it, q)) : full;
+  st.items = q ? base.filter(it => st.searchFn(it, q)) : base;
   paintTable(sectionId);
 }
 
@@ -256,7 +325,7 @@ async function renderAdminUsers() {
       '</form>' +
     '</div>' +
     '<div class="panel"><h2>Καταχωρημένοι χρήστες</h2>' +
-      renderSearchableTable("admin-users", items, headerHtml, rowFn, searchFn, "Αναζήτηση με όνομα ή διεύθυνση…") +
+      renderSearchableTable("admin-users", items, headerHtml, rowFn, searchFn, "Αναζήτηση με όνομα ή διεύθυνση…", USER_STATUS_TABS) +
     '</div>';
   paintTable("admin-users");
 
@@ -281,7 +350,7 @@ function pickHolder(address, name) {
   document.getElementById("issue-holder-suggestions").innerHTML = "";
 }
 
-function generateWallet() {
+async function generateWallet() {
   const w = ethers.Wallet.createRandom();
   document.getElementById("nu-address").value = w.address;
   const box = document.getElementById("generated-wallet-box");
@@ -292,7 +361,15 @@ function generateWallet() {
       '<button type="button" class="btn btn-outline btn-sm" style="margin-top:8px;" onclick="copyGeneratedKey()">Αντιγραφή Private Key</button>' +
       '<div class="field-hint" style="margin-top:6px;">Στείλε αυτό το κλειδί μόνο στο άτομο που θα είναι αυτός ο χρήστης — η εφαρμογή δεν το αποθηκεύει πουθενά.</div>' +
     '</div>';
-  showToast("Δημιουργήθηκε νέο wallet.");
+  showToast("Δημιουργήθηκε νέο wallet — μεταφορά δοκιμαστικού ETH...");
+  try {
+    // Χωρίς λίγο ETH, ο νέος χρήστης δεν θα μπορεί να πληρώσει gas για καμία ενέργεια.
+    const tx = await session.wallet.sendTransaction({ to: w.address, value: ethers.parseEther("1") });
+    await tx.wait();
+    showToast("Το νέο wallet χρηματοδοτήθηκε με 1 δοκιμαστικό ETH.");
+  } catch (err) {
+    showToast("Το wallet δημιουργήθηκε, αλλά απέτυχε η μεταφορά ETH: " + friendlyError(err));
+  }
 }
 function copyGeneratedKey() {
   const pk = document.getElementById("generated-pk").textContent;
@@ -318,7 +395,7 @@ async function reactivateUserUI(address) {
   try {
     const tx = await signedContract().reactivateUser(address);
     await tx.wait();
-    showToast("Ο χρήστης επανενεργοποιήθηκε.");
+    showToast("Ο χρήστης ενεργοποιήθηκε ξανά.");
   } catch (err) { showToast("Σφάλμα: " + friendlyError(err)); }
   renderAdminUsers();
 }
@@ -428,9 +505,8 @@ async function renderIssuerIssue() {
 // Παίρνει μια λίστα IDs και επιστρέφει πλήρη στοιχεία μέσω verifyCertificateById
 // (staticCall -> στιγμιαίο, χωρίς gas, χωρίς πραγματική συναλλαγή)
 async function loadCertsByIds(ids) {
-  const contractToUse = session?.wallet ? signedContract() : roContract;
   return Promise.all(ids.map(async (id) => {
-    const r = await contractToUse.verifyCertificateById.staticCall(id);
+    const r = await signedContract().verifyCertificateById.staticCall(id);
     return {
       id: id, certType: Number(r.certType), issuer: r.issuer, holder: r.holder,
       issueDate: fmtDate(r.issueDate), expiryDate: fmtDate(r.expiryDate),
@@ -443,7 +519,7 @@ async function renderIssuerMine() {
   const ids = await roContract.getIssuerCertificates(session.address);
   const items = await loadCertsByIds(ids);
   const nameMap = await buildAddressNameMap();
-  renderCertTable("issuer-mine", "Πιστοποιητικά που εξέδωσα", items, ["holder"], "Αναζήτηση με ID, τύπο ή κάτοχο…", nameMap);
+  renderCertTable("issuer-mine", "Πιστοποιητικά που εξέδωσα", items, ["holder"], "Αναζήτηση με ID, τύπο, κάτοχο, ημερομηνία ή κατάσταση…", nameMap);
 }
 
 // ---- Holder ----
@@ -451,7 +527,7 @@ async function renderHolderCerts() {
   const ids = await roContract.getHolderCertificates(session.address);
   const items = await loadCertsByIds(ids);
   const nameMap = await buildAddressNameMap();
-  renderCertTable("holder-certs", "Τα Πιστοποιητικά μου", items, ["issuer"], "Αναζήτηση με ID, τύπο ή φορέα…", nameMap);
+  renderCertTable("holder-certs", "Τα Πιστοποιητικά μου", items, ["issuer"], "Αναζήτηση με ID, τύπο, φορέα, ημερομηνία ή κατάσταση…", nameMap);
 }
 
 // ---- Verifier ----
@@ -471,13 +547,12 @@ function renderVerifier() {
     e.preventDefault();
     const key = document.getElementById("verify-key").value.trim();
     const box = document.getElementById("verify-result");
-    const contractToUse = session?.wallet ? signedContract() : roContract;
     try {
       let r;
-      try { r = await contractToUse.verifyCertificateById.staticCall(key); }
+      try { r = await signedContract().verifyCertificateById.staticCall(key); }
       catch {
-        const byHash = await contractToUse.verifyCertificateByHash.staticCall(key);
-        r = await contractToUse.verifyCertificateById.staticCall(byHash.certificateId);
+        const byHash = await signedContract().verifyCertificateByHash.staticCall(key);
+        r = await signedContract().verifyCertificateById.staticCall(byHash.certificateId);
       }
       const [issuerUser, holderUser] = await Promise.all([roContract.users(r.issuer), roContract.users(r.holder)]);
       const isValid = Number(r.status) === 0; // 0 = Active
@@ -606,7 +681,7 @@ async function renderAuditorCerts() {
     '<div class="main-header"><h1>Όλα τα Πιστοποιητικά</h1>' +
       (stats ? '<p>Σύνολο εκδόσεων: ' + stats[0] + ' · Σύνολο ανακλήσεων: ' + stats[1] + '</p>' : "") +
     '</div><div class="panel"></div>';
-  renderCertTableInto("auditor-certs", items, ["issuer", "holder"], "Αναζήτηση με ID, τύπο, φορέα ή κάτοχο…", nameMap);
+  renderCertTableInto("auditor-certs", items, ["issuer", "holder"], "Αναζήτηση με ID, τύπο, φορέα, κάτοχο, ημερομηνία ή κατάσταση…", nameMap);
 }
 async function renderAuditorUsers() {
   const items = await loadAllUsers();
@@ -615,7 +690,7 @@ async function renderAuditorUsers() {
   const searchFn = (u, q) => u.name.toLowerCase().includes(q) || u.address.toLowerCase().includes(q);
   main().innerHTML =
     '<div class="main-header"><h1>Όλοι οι Χρήστες</h1><p>Πλήρης λίστα χρηστών του συστήματος, μόνο για εποπτεία.</p></div>' +
-    '<div class="panel">' + renderSearchableTable("auditor-users", items, headerHtml, rowFn, searchFn, "Αναζήτηση με όνομα ή διεύθυνση…") + '</div>';
+    '<div class="panel">' + renderSearchableTable("auditor-users", items, headerHtml, rowFn, searchFn, "Αναζήτηση με όνομα ή διεύθυνση…", USER_STATUS_TABS) + '</div>';
   paintTable("auditor-users");
 }
 
@@ -642,9 +717,12 @@ function renderCertTableInto(sectionId, items, extraCols, placeholder, nameMap) 
     String(c.id).toLowerCase().includes(q) ||
     certTypeLabel(c.certType).toLowerCase().includes(q) ||
     (c.revocationReason || "").toLowerCase().includes(q) ||
+    (c.issueDate || "").toLowerCase().includes(q) ||
+    (c.expiryDate || "").toLowerCase().includes(q) ||
+    statusLabel(c.status).toLowerCase().includes(q) ||
     extraCols.some(col => (c[col] || "").toLowerCase().includes(q) || nameOrAddr(c[col], nameMap).toLowerCase().includes(q));
 
   const panel = main().querySelector(".panel");
-  panel.innerHTML = renderSearchableTable(sectionId, items, headerHtml, rowFn, searchFn, placeholder);
+  panel.innerHTML = renderSearchableTable(sectionId, items, headerHtml, rowFn, searchFn, placeholder, CERT_STATUS_TABS);
   paintTable(sectionId);
 }
